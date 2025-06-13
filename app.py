@@ -67,7 +67,7 @@ if not API_KEY:
 def get_db_connection():
     conn = None
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(f'file:{DB_PATH}?mode=ro', uri=True)
         conn.row_factory = sqlite3.Row  # This enables column access by name
         return conn
     except sqlite3.Error as e:
