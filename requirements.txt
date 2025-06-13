@@ -11,3 +11,4 @@ markdown
 python-multipart
 setuptools
 pillow
+sqlitecloud
