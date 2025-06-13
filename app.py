@@ -79,43 +79,6 @@ def get_db_connection():
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=error_msg)
 
-# Make sure database exists or create it
-if not os.path.exists(DB_PATH):
-    conn = get_sqlitecloud_connection()
-    c = conn.cursor()
-    # Create discourse_chunks table
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS discourse_chunks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        post_id INTEGER,
-        topic_id INTEGER,
-        topic_title TEXT,
-        post_number INTEGER,
-        author TEXT,
-        created_at TEXT,
-        likes INTEGER,
-        chunk_index INTEGER,
-        content TEXT,
-        url TEXT,
-        embedding BLOB
-    )
-    ''')
-    
-    # Create markdown_chunks table
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS markdown_chunks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        doc_title TEXT,
-        original_url TEXT,
-        downloaded_at TEXT,
-        chunk_index INTEGER,
-        content TEXT,
-        embedding BLOB
-    )
-    ''')
-    conn.commit()
-    conn.close()
-
 # Vector similarity calculation with improved handling
 def cosine_similarity(vec1, vec2):
     try:
