@@ -19,7 +19,6 @@ from dotenv import load_dotenv
 from PIL import Image
 import io
 
-# Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
