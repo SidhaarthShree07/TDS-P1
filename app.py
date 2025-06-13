@@ -321,7 +321,7 @@ async def enrich_with_adjacent_chunks(conn, results):
                     """, (post_id, current_chunk_index - 1))
                     prev_chunk = cursor.fetchone()
                     if prev_chunk:
-                        additional_content = prev_chunk[9] + " "
+                        additional_content = prev_chunk[0] + " "
                 
                 # Try to get next chunk
                 cursor.execute("""
@@ -330,7 +330,7 @@ async def enrich_with_adjacent_chunks(conn, results):
                 """, (post_id, current_chunk_index + 1))
                 next_chunk = cursor.fetchone()
                 if next_chunk:
-                    additional_content += " " + next_chunk[9]
+                    additional_content += " " + next_chunk[0]
                 
             elif result["source"] == "markdown":
                 title = result["title"]
@@ -344,7 +344,7 @@ async def enrich_with_adjacent_chunks(conn, results):
                     """, (title, current_chunk_index - 1))
                     prev_chunk = cursor.fetchone()
                     if prev_chunk:
-                        additional_content = prev_chunk[5] + " "
+                        additional_content = prev_chunk[0] + " "
                 
                 # Try to get next chunk
                 cursor.execute("""
@@ -353,7 +353,7 @@ async def enrich_with_adjacent_chunks(conn, results):
                 """, (title, current_chunk_index + 1))
                 next_chunk = cursor.fetchone()
                 if next_chunk:
-                    additional_content += " " + next_chunk[5]
+                    additional_content += " " + next_chunk[0]
             
             # Add the enriched content
             if additional_content:
