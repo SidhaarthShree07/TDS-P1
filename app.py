@@ -16,6 +16,8 @@ from fastapi.responses import JSONResponse
 import uvicorn
 import traceback
 from dotenv import load_dotenv
+from PIL import Image
+import io
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -28,6 +30,8 @@ MAX_RESULTS = 10  # Increased to get more context
 load_dotenv()
 MAX_CONTEXT_CHUNKS = 4  # Increased number of chunks per source
 API_KEY = os.getenv("API_KEY")  # Get API key from environment variable
+N_API_KEY = os.getenv("N_API_KEY")
+print("Loaded API_KEY (partial):", API_KEY[:10])
 
 # Models
 class QueryRequest(BaseModel):
@@ -134,6 +138,18 @@ def cosine_similarity(vec1, vec2):
         logger.error(traceback.format_exc())
         return 0.0  # Return 0 similarity on error rather than crashing
 
+def detect_image_mime_type(base64_str: str) -> str:
+    try:
+        image_data = base64.b64decode(base64_str)
+        image = Image.open(io.BytesIO(image_data))
+        format = image.format.lower()
+        mime = f"image/{format}" if format != "jpeg" else "image/jpeg"
+        logger.info(f"Detected image format: {format}, MIME type: {mime}")
+        return mime
+    except Exception as e:
+        logger.error(f"Error detecting image format: {e}")
+        return "image/jpeg"  # Default fallback
+
 # Function to get embedding from aipipe proxy with retry mechanism
 async def get_embedding(text, max_retries=3):
     if not API_KEY:
@@ -146,7 +162,7 @@ async def get_embedding(text, max_retries=3):
         try:
             logger.info(f"Getting embedding for text (length: {len(text)})")
             # Call the embedding API through aipipe proxy
-            url = "https://aipipe.org/openai/v1/embeddings"
+            url = "https://aiproxy.sanand.workers.dev/openai/v1/embeddings"
             headers = {
                 "Authorization": API_KEY,
                 "Content-Type": "application/json"
@@ -425,8 +441,7 @@ async def generate_answer(question, relevant_results, max_retries=2):
             """
             
             logger.info("Sending request to LLM API")
-            # Call OpenAI API through aipipe proxy
-            url = "https://aipipe.org/openai/v1/chat/completions"
+            url = "https://aiproxy.sanand.workers.dev/openai/v1/chat/completions"
             headers = {
                 "Authorization": API_KEY,
                 "Content-Type": "application/json"
@@ -467,7 +482,7 @@ async def generate_answer(question, relevant_results, max_retries=2):
 
 # Function to process multimodal content (text + image)
 async def process_multimodal_query(question, image_base64):
-    if not API_KEY:
+    if not N_API_KEY:
         error_msg = "API_KEY environment variable not set"
         logger.error(error_msg)
         raise HTTPException(status_code=500, detail=error_msg)
@@ -482,12 +497,14 @@ async def process_multimodal_query(question, image_base64):
         # Call the GPT-4o Vision API to process the image and question
         url = "https://aipipe.org/openai/v1/chat/completions"
         headers = {
-            "Authorization": API_KEY,
+            "Authorization": N_API_KEY,
             "Content-Type": "application/json"
         }
         
         # Format the image for the API
-        image_content = f"data:image/jpeg;base64,{image_base64}"
+        mime_type = detect_image_mime_type(image_base64)
+        image_content = f"data:{mime_type};base64,{image_base64}"
+
         
         payload = {
             "model": "gpt-4o-mini",
@@ -727,4 +744,3 @@ async def health_check():
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=8000, reload=True) 
     
-git remote add origin https://github.com/SidhaarthShree07/TDS-P1.git
