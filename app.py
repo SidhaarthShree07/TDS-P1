@@ -18,13 +18,13 @@ import traceback
 from dotenv import load_dotenv
 from PIL import Image
 import io
+import sqlitecloud
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Ensure correct path to db on Vercel (read-only file access)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "knowledge_base.db")
+SQLITECLOUD_URL = os.getenv("SQLITECLOUD_URL")
 
 SIMILARITY_THRESHOLD = 0.68  # Lowered threshold for better recall
 MAX_RESULTS = 10  # Increased to get more context
@@ -63,11 +63,14 @@ app.add_middleware(
 if not API_KEY:
     logger.error("API_KEY environment variable is not set. The application will not function correctly.")
 
+def get_sqlitecloud_connection():
+    return sqlitecloud.connect(SQLITECLOUD_URL)
+    
 # Create a connection to the SQLite database
 def get_db_connection():
     conn = None
     try:
-        conn = sqlite3.connect(f'file:{DB_PATH}?mode=ro', uri=True)
+        conn = get_sqlitecloud_connection()
         conn.row_factory = sqlite3.Row  # This enables column access by name
         return conn
     except sqlite3.Error as e:
@@ -78,7 +81,7 @@ def get_db_connection():
 
 # Make sure database exists or create it
 if not os.path.exists(DB_PATH):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_sqlitecloud_connection()
     c = conn.cursor()
     # Create discourse_chunks table
     c.execute('''
@@ -707,7 +710,7 @@ async def query_knowledge_base(request: QueryRequest):
 async def health_check():
     try:
         # Try to connect to the database as part of health check
-        conn = sqlite3.connect(DB_PATH)
+        conn = get_sqlitecloud_connection()
         cursor = conn.cursor()
         
         # Check if tables exist and have data
