@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 # Ensure correct path to db on Vercel (read-only file access)
 SQLITECLOUD_URL = os.getenv("SQLITECLOUD_URL")
 
-SIMILARITY_THRESHOLD = 0.68  # Lowered threshold for better recall
+SIMILARITY_THRESHOLDS = [0.68, 0.58, 0.48, 0.38, 0.28]  # Lowered threshold for better recall
 MAX_RESULTS = 10  # Increased to get more context
 load_dotenv()
 MAX_CONTEXT_CHUNKS = 4  # Increased number of chunks per source
@@ -163,7 +163,7 @@ async def get_embedding(text, max_retries=3):
             await asyncio.sleep(3 * retries)  # Wait before retry
 
 # Function to find similar content in the database with improved logic
-async def find_similar_content(query_embedding, conn):
+async def find_similar_content(query_embedding, conn, threshold):
     try:
         logger.info("Finding similar content in database")
         cursor = conn.cursor()
@@ -187,7 +187,7 @@ async def find_similar_content(query_embedding, conn):
                 embedding = json.loads(chunk[11])
                 similarity = cosine_similarity(query_embedding, embedding)
                 
-                if similarity >= SIMILARITY_THRESHOLD:
+                if similarity >= threshold:
                     # Ensure URL is properly formatted
                     url = chunk[10]
                     if not url.startswith("http"):
@@ -604,11 +604,17 @@ async def query_knowledge_base(request: QueryRequest):
             )
             
             # Find similar content
+            # Find similar content with progressively lower thresholds
             logger.info("Finding similar content")
-            relevant_results = await find_similar_content(query_embedding, conn)
+            relevant_results = []
+            for threshold in SIMILARITY_THRESHOLDS:
+                logger.info(f"Trying similarity threshold: {threshold}")
+                relevant_results = await find_similar_content(query_embedding, conn, threshold)
+                if relevant_results:
+                    break
             
             if not relevant_results:
-                logger.info("No relevant results found")
+                logger.info("No relevant results found after all threshold attempts")
                 return {
                     "answer": "I couldn't find any relevant information in my knowledge base.",
                     "links": []
