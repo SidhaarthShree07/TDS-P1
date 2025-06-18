@@ -593,42 +593,52 @@ async def query_knowledge_base(request: QueryRequest):
             logger.info("Generating answer")
             llm_response = await generate_answer(request.question, enriched_results)
             
-            # Extract answer and sources from LLM response
-            answer = llm_response.get("answer", "")
-            sources = llm_response.get("links", [])
+            if isinstance(llm_response, dict):
+                answer = llm_response.get("answer", "")
+                sources = llm_response.get("links", [])
+            else:
+                # If it’s a plain string response from LLM (fallback or unexpected format)
+                answer = str(llm_response)
+                sources = []
+            
             # Fallback if LLM fails and similarity threshold was high
             if (
                 answer.strip().lower() == "i don't have enough information to answer this question." and 
                 similarity_threshold == 0.68 and 
                 len(relevant_results) > 0 and 
-                relevant_results[0]["source"] == "discourse"  # ✅ Ensure correct table
+                relevant_results[0]["source"] == "discourse"  # ✅ Only do this for discourse chunks
             ):
-                logger.info("⚠️ LLM did not answer even though similarity >= 0.68. Trying next 3 rows based on ID (discourse only)")
+                logger.info("⚠️ LLM did not answer even though similarity ≥ 0.68. Trying next 3 rows based on ID (discourse only)")
             
                 try:
                     base_id = relevant_results[0]["id"]
                     cursor = conn.cursor()
             
-                    # Get next 3 discourse_chunks by id
+                    # Get next 3 discourse_chunks by id (if available)
                     cursor.execute("""
                         SELECT content FROM discourse_chunks
-                        WHERE id > ? AND id <= ?
+                        WHERE id > ?
                         ORDER BY id ASC
-                    """, (base_id, base_id + 3))
+                        LIMIT 3
+                    """, (base_id,))
                     next_chunks = cursor.fetchall()
             
-                    # Rebuild content with next 3
-                    extra_context = " ".join(chunk[0] for chunk in next_chunks if chunk and chunk[0])
-                    enriched_results[0]["content"] += " " + extra_context
+                    if next_chunks:
+                        extra_context = " ".join(chunk[0] for chunk in next_chunks if chunk and chunk[0])
+                        enriched_results[0]["content"] += " " + extra_context
             
-                    logger.info("🔁 Re-generating LLM answer with additional adjacent context")
-                    llm_response = await generate_answer(request.question, enriched_results)
-                    answer = llm_response.get("answer", "")
-                    sources = llm_response.get("links", [])
+                        logger.info("🔁 Re-generating LLM answer with additional adjacent context")
+                        llm_response = await generate_answer(request.question, enriched_results)
+            
+                        if isinstance(llm_response, dict):
+                            answer = llm_response.get("answer", "")
+                            sources = llm_response.get("links", [])
+                        else:
+                            answer = str(llm_response)
+                            sources = []
             
                 except Exception as e:
                     logger.error(f"❌ Error in fallback enrichment with next 3 rows: {e}")
-
             
             # Parse the response
             logger.info("Parsing LLM response")
