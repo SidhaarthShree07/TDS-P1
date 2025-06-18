@@ -297,77 +297,42 @@ async def find_similar_content(query_embedding, conn, threshold):
         logger.error(traceback.format_exc())
         raise
 
-# Function to enrich content with adjacent chunks
-async def enrich_with_adjacent_chunks(conn, results):
-    try:
-        logger.info(f"Enriching {len(results)} results with adjacent chunks")
-        cursor = conn.cursor()
-        enriched_results = []
-        
-        for result in results:
-            enriched_result = result.copy()
-            additional_content = ""
-            
-            # Try to get adjacent chunks for context
-            if result["source"] == "discourse":
-                post_id = result["post_id"]
-                current_chunk_index = result["chunk_index"]
-                
-                # Try to get previous chunk
-                if current_chunk_index > 0:
-                    cursor.execute("""
-                    SELECT content FROM discourse_chunks 
-                    WHERE post_id = ? AND chunk_index = ?
-                    """, (post_id, current_chunk_index - 1))
-                    prev_chunk = cursor.fetchone()
-                    if prev_chunk:
-                        additional_content = prev_chunk[0] + " "
-                
-                # Try to get next chunk
-                cursor.execute("""
-                SELECT content FROM discourse_chunks 
-                WHERE post_id = ? AND chunk_index = ?
-                """, (post_id, current_chunk_index + 1))
-                next_chunk = cursor.fetchone()
-                if next_chunk:
-                    additional_content += " " + next_chunk[0]
-                
-            elif result["source"] == "markdown":
-                title = result["title"]
-                current_chunk_index = result["chunk_index"]
-                
-                # Try to get previous chunk
-                if current_chunk_index > 0:
-                    cursor.execute("""
-                    SELECT content FROM markdown_chunks 
-                    WHERE doc_title = ? AND chunk_index = ?
-                    """, (title, current_chunk_index - 1))
-                    prev_chunk = cursor.fetchone()
-                    if prev_chunk:
-                        additional_content = prev_chunk[0] + " "
-                
-                # Try to get next chunk
-                cursor.execute("""
-                SELECT content FROM markdown_chunks 
-                WHERE doc_title = ? AND chunk_index = ?
-                """, (title, current_chunk_index + 1))
-                next_chunk = cursor.fetchone()
-                if next_chunk:
-                    additional_content += " " + next_chunk[0]
-            
-            # Add the enriched content
-            if additional_content:
-                enriched_result["content"] = f"{result['content']} {additional_content}"
-            
-            enriched_results.append(enriched_result)
-        
-        logger.info(f"Successfully enriched {len(enriched_results)} results")
-        return enriched_results
-    except Exception as e:
-        error_msg = f"Error in enrich_with_adjacent_chunks: {e}"
-        logger.error(error_msg)
-        logger.error(traceback.format_exc())
-        raise
+async def enrich_with_adjacent_chunks(conn, relevant_results):
+    logger.info(f"Enriching {len(relevant_results)} results with adjacent chunks (based on id)")
+
+    enriched_results = []
+    cursor = conn.cursor()
+
+    for result in relevant_results:
+        try:
+            base_id = result["id"]
+            additional_content = result["content"]
+
+            # Add previous chunk (id - 1)
+            cursor.execute("SELECT content FROM discourse_chunks WHERE id = ?", (base_id - 1,))
+            prev_chunk = cursor.fetchone()
+            if prev_chunk:
+                additional_content = prev_chunk[0] + " " + additional_content
+
+            # Add next chunk (id + 1)
+            cursor.execute("SELECT content FROM discourse_chunks WHERE id = ?", (base_id + 1,))
+            next_chunk = cursor.fetchone()
+            if next_chunk:
+                additional_content += " " + next_chunk[0]
+
+            # Final enriched result
+            enriched_results.append({
+                **result,
+                "content": additional_content
+            })
+
+        except Exception as e:
+            logger.error(f"Error enriching result {result['id']}: {e}")
+            enriched_results.append(result)  # fallback to original
+
+    logger.info(f"Successfully enriched {len(enriched_results)} results")
+    return enriched_results
+
 
 # Function to generate an answer using LLM with improved prompt
 async def generate_answer(question, relevant_results, max_retries=2):
@@ -627,6 +592,43 @@ async def query_knowledge_base(request: QueryRequest):
             # Generate answer
             logger.info("Generating answer")
             llm_response = await generate_answer(request.question, enriched_results)
+            
+            # Extract answer and sources from LLM response
+            answer = llm_response.get("answer", "")
+            sources = llm_response.get("links", [])
+            # Fallback if LLM fails and similarity threshold was high
+            if (
+                answer.strip().lower() == "i don't have enough information to answer this question." and 
+                similarity_threshold == 0.68 and 
+                len(relevant_results) > 0 and 
+                relevant_results[0]["source"] == "discourse"  # ✅ Ensure correct table
+            ):
+                logger.info("⚠️ LLM did not answer even though similarity >= 0.68. Trying next 3 rows based on ID (discourse only)")
+            
+                try:
+                    base_id = relevant_results[0]["id"]
+                    cursor = conn.cursor()
+            
+                    # Get next 3 discourse_chunks by id
+                    cursor.execute("""
+                        SELECT content FROM discourse_chunks
+                        WHERE id > ? AND id <= ?
+                        ORDER BY id ASC
+                    """, (base_id, base_id + 3))
+                    next_chunks = cursor.fetchall()
+            
+                    # Rebuild content with next 3
+                    extra_context = " ".join(chunk[0] for chunk in next_chunks if chunk and chunk[0])
+                    enriched_results[0]["content"] += " " + extra_context
+            
+                    logger.info("🔁 Re-generating LLM answer with additional adjacent context")
+                    llm_response = await generate_answer(request.question, enriched_results)
+                    answer = llm_response.get("answer", "")
+                    sources = llm_response.get("links", [])
+            
+                except Exception as e:
+                    logger.error(f"❌ Error in fallback enrichment with next 3 rows: {e}")
+
             
             # Parse the response
             logger.info("Parsing LLM response")
