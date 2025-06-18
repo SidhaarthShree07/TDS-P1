@@ -572,10 +572,12 @@ async def query_knowledge_base(request: QueryRequest):
             # Find similar content with progressively lower thresholds
             logger.info("Finding similar content")
             relevant_results = []
+            used_similarity_threshold = None 
             for threshold in SIMILARITY_THRESHOLDS:
                 logger.info(f"Trying similarity threshold: {threshold}")
                 relevant_results = await find_similar_content(query_embedding, conn, threshold)
                 if relevant_results:
+                    used_similarity_threshold = threshold
                     break
             
             if not relevant_results:
@@ -604,7 +606,7 @@ async def query_knowledge_base(request: QueryRequest):
             # Fallback if LLM fails and similarity threshold was high
             if (
                 answer.strip().lower() == "i don't have enough information to answer this question." and 
-                similarity_threshold == 0.68 and 
+                used_similarity_threshold == 0.68 and 
                 len(relevant_results) > 0 and 
                 relevant_results[0]["source"] == "discourse"  # ✅ Only do this for discourse chunks
             ):
